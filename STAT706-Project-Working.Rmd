@@ -1,0 +1,380 @@
+---
+title: "STAT706-Project"
+author: "Ravindra Bharat"
+date: "11/8/2020"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(faraway)
+library(tidyverse)
+library(lmtest)
+library(MASS)
+library(printr)
+library(broom)
+library(corrplot)
+library(caret)
+library(scales)
+library(viridis)
+```
+
+# Introduction
+
+This data set is for house prices in Seattle, Washington.  I chose this data set because I was in Seattle a few years ago for a wedding.  The wedding took place on a beautiful lakeside property that had a wonderful view.  During undergrad I was part of a construction crew that helped build new houses so I've always had an interest in architecture.  Using this data set I would like to find out what variables help to predict the price of a new home in the greater Seattle area.
+
+
+```{r, echo=FALSE}
+kc <- read.csv("D:\\Documents\\DataSets\\kchousedata.csv",header=T,as.is=T)
+kc$id <- NULL
+kc$date <- NULL
+kc$sqft_living15 <- NULL
+kc$sqft_lot15 <- NULL
+```
+
+# Exploratory Data Analysis
+
+```{r,echo=FALSE, include=FALSE}
+summary(kc)
+summary(kc$bedrooms)
+summary(kc$bathrooms)
+kc$waterfront <- factor(kc$waterfront)
+kc$view <- factor(kc$view)
+kc$grade <- factor(kc$grade)
+kc$condition <- factor(kc$condition)
+```
+
+* Code dummy variables for the following variables: `waterfront`, `view`, `grade`, `condition`
+
+* One house has 33 bedrooms and upon further investigation that house is 1620 square feet and has 1.75 bathrooms.  This appears to be a typo and has been changed to 3 bedrooms instead.
+
+```{r, echo=FALSE}
+kc %>% 
+  summarize(bedrooms, sqft_above,sqft_basement, sqft_living, bathrooms) %>% 
+  filter(bedrooms == 33) %>% 
+  ungroup()
+```
+
+
+* Removed data where houses had zero bathrooms and bedrooms.
+
+* Created a new column for the age of the house called `house_age` which is current year minus the year the house was built.
+
+```{r, echo=FALSE}
+# Changing a specific value in a column
+# data.frame[row_number, column_number] = new_value
+kc[15871, 2] = 3
+```
+
+
+```{r,echo=FALSE, include = FALSE}
+kc %>% 
+  summarize(bedrooms, bathrooms) %>% 
+  filter(bathrooms == 0) %>% 
+  ungroup()
+```
+
+
+```{r,echo=FALSE}
+kc <- kc[kc$bathrooms != 0.00,]
+```
+
+
+```{r, echo = FALSE}
+kc$age <-  2020 - kc$yr_built
+```
+
+
+```{r, echo=FALSE}
+kc1 <- kc[,c(1,2,3,4,5,6,11,12,15,16)]
+```
+
+
+**Correlation Plot**
+
+```{r,echo=FALSE}
+corrplot(cor(kc1))
+```
+
+* Price is highly correlated with `sqft_living` and `sqft_above`
+
+* Price has a mid to low correlation with `bathrooms`, `bedrooms`, `floors`, and `lat`.  
+
+# Data Visualization
+
+**A. Price vs Living Space Size**
+
+The below scatter plot shows a strong linear relationship between total living space and the price of the house.  There seems to be an outlier bottom right of the graph.
+
+```{r,echo=FALSE}
+ggplot(kc1, aes(sqft_living, price)) +
+  geom_point(shape = 21, colour = "black", fill = "white", size = 1, stroke = 1) +
+  geom_smooth(se = FALSE, method="gam", formula = y ~ x) + 
+  scale_y_continuous(labels = dollar) + 
+  ggtitle("Price vs Living Space Size")
+```
+
+
+**B. Price vs Bathrooms**
+
+There appears to be some relationship between price and the number of bathrooms. This would make sense as the number of bathrooms increases does indicate an increase in total square foot of living space and we have seen that those two variables are highly correlated.  There is one outlier between 7 and 8 bathrooms where the price drops.
+
+```{r,echo=FALSE}
+ggplot(kc1, aes(bathrooms, price)) +
+  geom_point(shape = 21, colour = "black", fill = "white", size = 1, stroke = 1) + 
+  geom_smooth(se = FALSE, method="gam", formula = y ~ x) + 
+  scale_y_continuous(labels = dollar) + 
+  ggtitle("Price vs Bathrooms")
+```
+
+
+**C. Price vs Living Space Size and colored by Bathrooms**
+
+Due to the strong relationship between price vs living space size and price vs bathroom I wanted to see how all three of these variables worked together.  Sure enough as the living space size increases so does the number of bathrooms and thus the price increases.
+
+```{r,echo=FALSE}
+ggplot(kc1) + 
+  geom_point(aes(x = sqft_living, y = price, color = bathrooms)) + 
+  scale_y_continuous(labels = dollar) + 
+  scale_color_viridis(option = "C") + 
+  ggtitle("Price vs Living Space Size and colored by Bathrooms")
+```
+
+
+**D. Price vs Bedrooms**
+
+Past 3 bedrooms and house prices begin to climb quickly.  There does appear to be one outlier where the number of bedrooms exceeds 10, however the price does not match for that number of bedrooms.
+
+```{r,echo=FALSE}
+ggplot(kc, aes(bedrooms, price)) +
+  geom_point(shape = 21, colour = "black", fill = "white", size = 1, stroke = 1) + 
+  geom_smooth(se = FALSE, method = "gam", formula = y ~ x) + 
+  scale_y_continuous(labels = dollar) + 
+  ggtitle("Price vs Bedrooms")
+```
+
+**E. Price vs Lot Size**
+
+According to the below scatter plot the relationship between price and lot size is weak.  While there is a steady increase, it's not enough to conclude that lot size could be a factor in predicting price.  There are plenty of lot sizes that are very small and I think the outliers are having a profound impact.
+
+```{r,echo=FALSE}
+ggplot(kc1, aes(sqft_lot, price)) +
+  geom_point(shape = 21, colour = "black", fill = "white", size = 1, stroke = 1) + 
+  geom_smooth(se = FALSE, method = "gam", formula = y ~ x) + 
+  scale_y_continuous(labels = dollar) + 
+  ggtitle("Price vs Lot Size")
+```
+
+**F. Price vs Grade**
+
+The grade of the home is the building quality and construction and we can see the median house price increases as the quality of the home goes up. 
+
+```{r,echo=FALSE}
+ggplot(kc, aes(x = grade, y = price)) + 
+   geom_boxplot(outlier.colour = "red") + 
+   scale_y_continuous(labels = dollar) + 
+   ggtitle("Price vs Grade")
+```
+
+**G. Price vs Waterfront**
+
+We can see that the median price for a house with a waterfront (indicated by the 1) is much greater than a house that does not have a waterfront.  There are a great number of outliers for houses without waterfronts than there are houses with waterfronts.
+
+```{r,echo=FALSE}
+ggplot(kc, aes(x = waterfront, y = price)) + 
+   geom_boxplot(outlier.colour = "red", outlier.alpha = .1) + 
+   scale_y_continuous(labels = dollar) + 
+  ggtitle("Price vs Waterfront")
+```
+
+**H. Price vs Condition**
+
+The relationship between is not as strong.  It seems as though grade has much more impact than condition.
+
+```{r, echo=FALSE}
+ggplot(kc, aes(x = condition, y = price)) + 
+   geom_boxplot(outlier.colour = "red", outlier.alpha = .1) + 
+   scale_y_continuous(labels = dollar) + 
+   ggtitle("Price vs Condition")
+```
+
+**I. Price vs View**
+
+The view certainly has an effect on price as we can see on the box plot below.  The median price starts to increase heavily after a view that is rated a 2.  The price doesn't change much from a view that is rated a 1 to a 2.  
+
+```{r, echo = FALSE}
+ggplot(kc, aes(x = view, y = price)) + 
+   geom_boxplot(outlier.colour = "red", outlier.alpha = .1) + 
+   scale_y_continuous(labels = dollar) + 
+   ggtitle("Price vs View")
+```
+
+# Model Fit
+
+Based on the findings in the data visualization, I came up with the following linear regression model:
+
+```{r, echo = FALSE}
+lm1 <- lm(price ~ sqft_living + grade + lat + waterfront + view + condition + bathrooms + bedrooms + long, kc)
+sumary(lm1)
+```
+
+# Coefficient Interpretation
+
+* 71% of the variance of price can be explained by the regression equation
+
+* We see that categorical variables grade 4 to 10 are not significant nor is condition 2 and 3.
+
+* We interpret living space by saying that the average house price will increase by $155 when the square foot variable goes up by 1, all other variables held constant.
+
+* We interpret bathrooms by saying that the average house price will increase by $16,638 as the number of bathrooms increase by 1, all other variables held constant.
+
+* For the categorical variable `waterfront` we can interpret that by saying that the average house price will increase by $535,350 if the house has a waterfront view than if a house didn't have a waterfront view, all other variables held constant.
+
+* Taking the categorical variable `grade` that has multiple coded levels wen can interpret that are saying a house with grade 13 (the very best materials and construction) is significantly associated with an average increase of $2,017,700 in house price compared to house of grade 3 (the poorest materials).
+
+# 95% Confidence Intervals
+
+```{r, echo = FALSE}
+confint(lm1)
+```
+
+We are 95% confident that the confidence intervals contains the population mean for specified values.   
+
+# Residuals 
+
+**J. Residuals vs Fitted**
+
+We begin by assuming that there is homoscedasticity which is that the error term has constant variance for all levels of the independent variables.  However, based on the following residual plot, we can see that it fails this assumption.  While there isn't an obvious pattern, we do notice a cone like shape to the residual plot.  
+
+```{r, echo = FALSE}
+plot(lm1, which=1, col=c("green"))
+```
+
+**K. Q-Q for Residual Normality**
+
+We know that residuals should be normally distributed and if they were, they would follow very closely to a straight line.  However, on this plot we can see that the residuals at both tail ends are normally distributed.  According to Faraway this would be a long tailed error.
+
+```{r, echo = FALSE}
+plot(lm1, which=2, col=c("green"))
+```
+
+**L. Scale vs Location**
+
+On the following scale location plot we are testing to see that residuals have equal variance along the regression line.  Ideally we would like the line to be horizontal and to have an even distribution of the residuals above and below the line.  In this case, the line is clearly not horizontal nor is there an even distribution of residuals.  It looks like the residuals below the line are narrower than above.   
+
+```{r, echo = FALSE}
+plot(lm1, which=3, col=c("green"))
+```
+
+**M. Residuals vs Leverage**
+
+Using the following residuals vs leverage plot we can try and to identify observations that have a high influence on the model.  The influential observations should appear in the top right or bottom left of the chart inside the red dotted line which is Cook's Distance, however, there doesn't appear to be any observations that are marked by Cook's line.
+
+```{r, echo = FALSE}
+plot(lm1, which=5, col=c("green"))
+```
+
+It maybe that price is heavily skewed.  Examining the graph below shows that the house prices are heavily skewed to the left with the red dashed line representing the mean.  
+
+# Data Transformation
+
+* Both the `price`, `sqft_living`, `sqft_lot` variables have a positive skew.
+
+```{r, echo = FALSE}
+ggplot(kc1, aes(x = price)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = dollar)
+
+ggplot(kc1, aes(x = sqft_living)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = number)
+
+ggplot(kc1, aes(x = sqft_lot)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = number)
+
+```
+
+* Apply a logarithmic transformation to these three variables in order to produce a normal distribution.  This will help the model fit better and with residual plots.  The trade off is interpretation is more challenging.
+
+```{r, echo = FALSE}
+kc1$log_price <-  log(kc1$price)
+kc1$log_sqft_living <- log(kc1$sqft_living)
+kc1$log_sqft_lot <- log(kc$sqft_lot)
+kc$log_sqft_lot <- log(kc$sqft_lot)
+kc$log_price <-  log(kc$price)
+kc$log_sqft_living <- log(kc$sqft_living)
+```
+
+
+```{r, echo=FALSE}
+ggplot(kc1, aes(x = log_price)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = dollar)
+
+ggplot(kc1, aes(x = log_sqft_living)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = number)
+
+ggplot(kc1, aes(x = log_sqft_lot)) + 
+  geom_histogram(bins = 30, color="black", fill="white") + 
+  scale_x_continuous(labels = number)
+```
+
+
+# Model Fit Part 2
+
+Let's plot a new model using the new log variables.
+
+```{r,echo=FALSE}
+lm2 <- lm(log_price ~ log_sqft_living + grade + lat + waterfront + view + condition + bathrooms + bedrooms + long, kc)
+sumary(lm2)
+```
+
+* We do get a higher R squared of 75% than the previous model.
+
+* While this model seems more balanced, the coefficients are much harder to interpret due to the log transformations.
+
+# Residuals Part 2
+
+**N. Residuals vs Fitted**
+
+We can see an improvement in in the residuals already as they are more evenly dispersed on the top and bottom of the line.  There is no discernable pattern, nor is there a cone shape.
+
+```{r,echo=FALSE}
+plot(lm2, which=1, col=c("green"))
+```
+
+**O. Q-Q for Residual Normality**
+
+We can see that the residuals are much closer to than line than in the first model, however there are still many outliers.  The tails are also not as strong indicating much more normal residuals.
+
+```{r,echo=FALSE}
+plot(lm2, which=2, col=c("green"))
+```
+
+
+**P. Scale vs Location**
+
+This is a large improvement over the residuals for the previous model.  Here we finally have a straighter line with residual distribution below the line much more even.
+
+```{r,echo=FALSE}
+plot(lm2, which=3, col=c("green"))
+```
+
+
+**Q. Residuals vs Leverage**
+
+Examining Cook's distance, it looks like there is one massive outlier.
+
+```{r,echo=FALSE}
+plot(lm2, which=5, col=c("green"))
+```
+
+
+# Next Steps and Improvements
+
+Outlier analysis must be done because it is quite clear that these outliers are having serious impact on the data.  There are some houses that are large and have many bathrooms, but are not nearly as expensive as they should it.  It could be because the grade is poor or it does not have a waterfront view.  All of these questions should be answered in determining what data to remove from the data set and performing a new analysis.  While taking the log of the skewed variables seems to have helped produce more evenly distributed residuals, I am not sure it was worth it considering the interpretation of the new model is difficult.  Interpreting categorical variables based on log transformations is not easy to communicate.  
